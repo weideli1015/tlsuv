@@ -149,6 +149,8 @@ typedef struct um_http_s {
 
     uv_async_t proc;
     um_http_req_t *active;
+
+    uv_mutex_t req_mutex;
     STAILQ_HEAD(req_q, um_http_req_s) requests;
 } um_http_t;
 

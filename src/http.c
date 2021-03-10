@@ -132,6 +132,8 @@ static void fail_active_request(um_http_t *c, int code, const char *msg) {
     }
 
     um_http_req_t *r;
+
+    uv_mutex_lock(&c->req_mutex);
     while (!STAILQ_EMPTY(&c->requests)) {
         r = STAILQ_FIRST(&c->requests);
         STAILQ_REMOVE_HEAD(&c->requests, _next);
@@ -144,6 +146,7 @@ static void fail_active_request(um_http_t *c, int code, const char *msg) {
         http_req_free(r);
         free(r);
     }
+    uv_mutex_unlock(&c->req_mutex);
 }
 
 static void on_tls_handshake(tls_link_t *tls, int status) {
@@ -308,16 +311,24 @@ static void idle_timeout(uv_timer_t *t) {
 static void process_requests(uv_async_t *ar) {
     um_http_t *c = ar->data;
 
+    UM_LOG(WARN, "reffing c->proc[%p] active=%d", &c->proc, uv_is_active(ar));
+    uv_ref((uv_handle_t *) &c->proc);
+
+    //uv_timer_stop(&c->conn_timer);
+
+    uv_mutex_lock(&c->req_mutex);
     if (c->active == NULL && !STAILQ_EMPTY(&c->requests)) {
         c->active = STAILQ_FIRST(&c->requests);
         STAILQ_REMOVE_HEAD(&c->requests, _next);
     }
+    uv_mutex_unlock(&c->req_mutex);
 
     if (c->active == NULL) {
         if (c->connected == Connected && c->idle_time >= 0) {
             UM_LOG(VERB, "no more requests, scheduling idle(%ld) close", c->idle_time);
             uv_timer_start(&c->conn_timer, idle_timeout, c->idle_time, 0);
         }
+        UM_LOG(WARN, "un-reffing c->proc[%p]", &c->proc);
         uv_unref((uv_handle_t *) &c->proc);
         return;
     }
@@ -368,7 +379,10 @@ int um_http_close(um_http_t *clt) {
 }
 
 int um_http_init_with_src(uv_loop_t *l, um_http_t *clt, const char *url, um_src_t *src) {
+
+    uv_mutex_init(&clt->req_mutex);
     STAILQ_INIT(&clt->requests);
+
     LIST_INIT(&clt->headers);
 
     clt->ssl = false;
@@ -429,7 +443,6 @@ int um_http_init_with_src(uv_loop_t *l, um_http_t *clt, const char *url, um_src_
     sprintf(clt->port, "%d", port);
 
     uv_async_init(l, &clt->proc, process_requests);
-    uv_unref((uv_handle_t *) &clt->proc);
     clt->proc.data = clt;
 
     return 0;
@@ -467,9 +480,10 @@ um_http_req_t *um_http_req(um_http_t *c, const char *method, const char *path, u
         set_http_header(&r->req_headers, h->name, h->value);
     }
 
+    uv_mutex_lock(&c->req_mutex);
     STAILQ_INSERT_TAIL(&c->requests, r, _next);
-    uv_timer_stop(&c->conn_timer);
-    uv_ref((uv_handle_t *) &c->proc);
+    uv_mutex_unlock(&c->req_mutex);
+
     uv_async_send(&c->proc);
 
     return r;
@@ -577,10 +591,12 @@ static void free_http(um_http_t *clt) {
         clt->active = NULL;
     }
 
+    uv_mutex_lock(&clt->req_mutex);
     while (!STAILQ_EMPTY(&clt->requests)) {
         um_http_req_t *req = STAILQ_FIRST(&clt->requests);
         STAILQ_REMOVE_HEAD(&clt->requests, _next);
         http_req_free(req);
         free(req);
     }
+    uv_mutex_unlock(&clt->req_mutex);
 }
