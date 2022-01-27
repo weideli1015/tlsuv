@@ -51,6 +51,8 @@ static void close_connection(um_http_t *c);
 
 static void free_http(um_http_t *clt);
 
+static void process_requests(uv_prepare_t *ar);
+
 enum status {
     Disconnected,
     Connecting,
@@ -77,7 +79,7 @@ static void http_read_cb(uv_link_t *link, ssize_t nread, const uv_buf_t *buf) {
         }
 
         close_connection(c);
-        uv_async_send(&c->proc);
+//        uv_async_send(&c->proc);
         if (buf && buf->base) {
             free(buf->base);
         }
@@ -113,7 +115,7 @@ static void http_read_cb(uv_link_t *link, ssize_t nread, const uv_buf_t *buf) {
                 close_connection(c);
             }
             else {
-                uv_async_send(&c->proc);
+                // uv_async_send(&c->proc);
             }
         }
     } else if (nread > 0) {
@@ -156,7 +158,7 @@ static void on_tls_handshake(tls_link_t *tls, int status) {
     switch (status) {
         case TLS_HS_COMPLETE:
             clt->connected = Connected;
-            uv_async_send(&clt->proc);
+            //uv_async_send(&clt->proc);
             break;
 
         case TLS_HS_ERROR:
@@ -197,21 +199,22 @@ static void make_links(um_http_t *clt, uv_link_t *conn_src) {
 
     if (!clt->ssl) {
         clt->connected = Connected;
-        uv_async_send(&clt->proc);
+        //uv_async_send(&clt->proc);
     }
 }
 
 static void link_close_cb(uv_link_t *l) {
     um_http_t *clt = l->data;
     if (clt) {
-        uv_async_send(&clt->proc);
+        // uv_prepare_start(clt->proc, process_requests);
+        //uv_async_send(&clt->proc);
     }
 }
 
 static void src_connect_cb(um_src_t *src, int status, void *ctx) {
     UM_LOG(VERB, "src connected status = %d", status);
     um_http_t *clt = ctx;
-    uv_timer_stop(&clt->conn_timer);
+    uv_timer_stop(clt->conn_timer);
     if (status == 0) {
         switch (clt->connected) {
             case Connecting:
@@ -231,7 +234,7 @@ static void src_connect_cb(um_src_t *src, int status, void *ctx) {
         UM_LOG(DEBG, "failed to connect: %d(%s)", status, uv_strerror(status));
         clt->connected = Disconnected;
         fail_active_request(clt, status, uv_strerror(status));
-        uv_async_send(&clt->proc);
+        // uv_async_send(clt->proc);
     }
 }
 
@@ -312,7 +315,7 @@ static void send_body(um_http_req_t *req) {
 }
 
 static void close_connection(um_http_t *c) {
-    uv_timer_stop(&c->conn_timer);
+    uv_timer_stop(c->conn_timer);
     switch (c->connected) {
         case Handshaking:
         case Connected:
@@ -330,7 +333,7 @@ static void idle_timeout(uv_timer_t *t) {
     close_connection(clt);
 }
 
-static void process_requests(uv_async_t *ar) {
+static void process_requests(uv_prepare_t *ar) {
     um_http_t *c = ar->data;
 
     if (c->active == NULL && !STAILQ_EMPTY(&c->requests)) {
@@ -341,9 +344,11 @@ static void process_requests(uv_async_t *ar) {
     if (c->active == NULL) {
         if (c->connected == Connected && c->idle_time >= 0) {
             UM_LOG(VERB, "no more requests, scheduling idle(%ld) close", c->idle_time);
-            uv_timer_start(&c->conn_timer, idle_timeout, c->idle_time, 0);
+            uv_timer_start(c->conn_timer, idle_timeout, c->idle_time, 0);
         }
-        uv_unref((uv_handle_t *) &c->proc);
+        UM_LOG(INFO, "stopping proc(%p)", c->proc);
+        uv_prepare_stop(c->proc);
+        uv_unref((uv_handle_t *) c->proc);
         return;
     }
 
@@ -351,7 +356,7 @@ static void process_requests(uv_async_t *ar) {
         c->connected = Connecting;
         UM_LOG(VERB, "client not connected, starting connect sequence");
         if (c->connect_timeout > 0) {
-            uv_timer_start(&c->conn_timer, src_connect_timeout, c->connect_timeout, 0);
+            uv_timer_start(c->conn_timer, src_connect_timeout, c->connect_timeout, 0);
         }
         int rc = c->src->connect(c->src, c->host, c->port, src_connect_cb, c);
         if (rc != 0) {
@@ -381,8 +386,14 @@ static void process_requests(uv_async_t *ar) {
 int um_http_close(um_http_t *clt) {
     fail_active_request(clt, UV_ECANCELED, uv_strerror(UV_ECANCELED));
     close_connection(clt);
-    uv_close((uv_handle_t *) &clt->conn_timer, NULL);
-    uv_close((uv_handle_t *) &clt->proc, NULL);
+    clt->conn_timer->data = NULL;
+    uv_close((uv_handle_t *) clt->conn_timer, (uv_close_cb) free);
+    clt->conn_timer = NULL;
+
+    clt->proc->data = NULL;
+    UM_LOG(INFO, "closing proc(%p)", clt->proc);
+    uv_close((uv_handle_t *) clt->proc, (uv_close_cb) free);
+    clt->proc = NULL;
 
     if (clt->src != NULL) { 
         clt->src->release(clt->src);
@@ -405,9 +416,10 @@ int um_http_init_with_src(uv_loop_t *l, um_http_t *clt, const char *url, um_src_
 
     clt->connect_timeout = 0;
     clt->idle_time = DEFAULT_IDLE_TIMEOUT;
-    uv_timer_init(l, &clt->conn_timer);
-    uv_unref((uv_handle_t *) &clt->conn_timer);
-    clt->conn_timer.data = clt;
+    clt->conn_timer = calloc(1, sizeof(uv_timer_t));
+    uv_timer_init(l, clt->conn_timer);
+    uv_unref((uv_handle_t *) clt->conn_timer);
+    clt->conn_timer->data = clt;
 
     clt->prefix = NULL;
     um_http_header(clt, "Connection", "keep-alive");
@@ -457,9 +469,10 @@ int um_http_init_with_src(uv_loop_t *l, um_http_t *clt, const char *url, um_src_
 
     sprintf(clt->port, "%d", port);
 
-    uv_async_init(l, &clt->proc, process_requests);
-    uv_unref((uv_handle_t *) &clt->proc);
-    clt->proc.data = clt;
+    clt->proc = calloc(1, sizeof(uv_prepare_t));
+    uv_prepare_init(l, clt->proc);
+    uv_unref((uv_handle_t *) clt->proc);
+    clt->proc->data = clt;
 
     return 0;
 }
@@ -476,8 +489,9 @@ void um_http_set_path_prefix(um_http_t *clt, const char *prefix) {
 }
 
 int um_http_init(uv_loop_t *l, um_http_t *clt, const char *url) {
-    tcp_src_init(l, &clt->default_src);
-    return um_http_init_with_src(l, clt, url, (um_src_t *)&clt->default_src);
+    clt->default_src = calloc(1, sizeof(tcp_src_t));
+    tcp_src_init(l, clt->default_src);
+    return um_http_init_with_src(l, clt, url, (um_src_t *)clt->default_src);
 }
 int um_http_connect_timeout(um_http_t *clt, long millis) {
     clt->connect_timeout = millis;
@@ -508,9 +522,9 @@ um_http_req_t *um_http_req(um_http_t *c, const char *method, const char *path, u
     }
 
     STAILQ_INSERT_TAIL(&c->requests, r, _next);
-    uv_timer_stop(&c->conn_timer);
-    uv_ref((uv_handle_t *) &c->proc);
-    uv_async_send(&c->proc);
+    uv_timer_stop(c->conn_timer);
+    uv_ref((uv_handle_t *) c->proc);
+    uv_prepare_start(c->proc, process_requests);
 
     return r;
 }
@@ -565,8 +579,6 @@ void um_http_req_end(um_http_req_t *req) {
 
             prev->next = chunk;
         }
-
-        uv_async_send(&req->client->proc);
     }
 }
 
@@ -598,13 +610,13 @@ int um_http_req_data(um_http_req_t *req, const char *body, ssize_t body_len, um_
         prev->next = chunk;
     }
 
-    uv_async_send(&req->client->proc);
     return 0;
 }
 
 static void free_http(um_http_t *clt) {
     free_hdr_list(&clt->headers);
     free(clt->host);
+    clt->host = NULL;
     if (clt->prefix) free(clt->prefix);
     if (clt->engine != NULL) {
         clt->tls->api->free_engine(clt->engine);

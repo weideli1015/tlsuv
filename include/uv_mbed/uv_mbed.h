@@ -59,6 +59,8 @@ struct uv_mbed_s {
     tls_link_t tls_link;
 
     tls_context *tls;
+    tls_context_api *api;
+
     tls_engine *tls_engine;
 
     char *host;

@@ -162,6 +162,7 @@ static void tcp_src_cancel(um_src_t *sl) {
 
 static void tcp_src_release(um_src_t *sl) {
     tcp_src_cancel(sl);
-    free(sl->link);
+    //uv_link_close(sl->link, (uv_link_close_cb) free);
+    //free(sl->link);
     sl->link = NULL;
 }

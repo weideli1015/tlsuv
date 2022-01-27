@@ -58,6 +58,7 @@ int uv_mbed_init(uv_loop_t *l, uv_mbed_t *mbed, tls_context *tls) {
     tcp_src_init(l, &mbed->socket);
     uv_link_init((uv_link_t *) mbed, &mbed_methods);
     mbed->tls = tls != NULL ? tls : get_default_tls();
+    mbed->api = mbed->tls->api;
     mbed->tls_engine = NULL;
     mbed->host = NULL;
     mbed->conn_req = NULL;
@@ -174,7 +175,7 @@ int uv_mbed_free(uv_mbed_t *mbed) {
         mbed->host = NULL;
     }
     if (mbed->tls_engine) {
-        mbed->tls->api->free_engine(mbed->tls_engine);
+        mbed->api->free_engine(mbed->tls_engine);
         mbed->tls_engine = NULL;
     }
     mbed->socket.release((um_src_t *) &mbed->socket);

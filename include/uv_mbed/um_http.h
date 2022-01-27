@@ -139,16 +139,17 @@ typedef struct um_http_s {
 
     int connected;
     um_src_t *src;
-    tcp_src_t default_src;
+    tcp_src_t *default_src;
 
     uv_link_t http_link;
     tls_link_t tls_link;
 
     long connect_timeout;
     long idle_time;
-    uv_timer_t conn_timer;
+    uv_timer_t *conn_timer;
 
-    uv_async_t proc;
+    uv_prepare_t *proc;
+    //uv_async_t proc;
     um_http_req_t *active;
     STAILQ_HEAD(req_q, um_http_req_s) requests;
 } um_http_t;
