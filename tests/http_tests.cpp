@@ -466,7 +466,7 @@ TEST_CASE("server_idle_close","[.]") {
 
         THEN("request should be fast and then idle until server disconnects") {
             REQUIRE(resp.code == HTTP_STATUS_OK);
-            REQUIRE(duration(start, resp.resp_endtime) < ONE_SECOND);
+            REQUIRE(duration(start, resp.resp_endtime) < 2 * ONE_SECOND);
             auto test_duration = duration(start, stop);
             REQUIRE(test_duration >= 5 * ONE_SECOND);
             REQUIRE(test_duration < 30 * ONE_SECOND);
@@ -641,6 +641,7 @@ TEST_CASE("multiple requests", "[http]") {
 
     uv_loop_close(loop);
     free(loop);
+    free(timer);
 }
 
 // test proper client->engine cleanup between requests

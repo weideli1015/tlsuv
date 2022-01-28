@@ -143,7 +143,7 @@ static void tcp_src_cancel(um_src_t *sl) {
     if (tl->conn) {
         UM_LOG(TRACE, "closing %p active(%d) src_link->stream(%p)", tl->conn, uv_is_active((const uv_handle_t *) tl->conn), ts->stream);
         int rc = uv_tcp_close_reset(tl->conn, free_handle);
-        UM_LOG(TRACE, "close_reset() =  %d, is_closing = %d(%s)", rc, uv_is_closing((const uv_handle_t *) tl->conn), uv_strerror(rc));
+        UM_LOG(TRACE, "close_reset() =  %d, is_closing = %d(%s)", rc, uv_is_closing((const uv_handle_t *) tl->conn), rc ? uv_strerror(rc) : "");
 
         if (rc != 0) {
             if (uv_is_closing((const uv_handle_t *) tl->conn)) {
@@ -163,6 +163,6 @@ static void tcp_src_cancel(um_src_t *sl) {
 static void tcp_src_release(um_src_t *sl) {
     tcp_src_cancel(sl);
     //uv_link_close(sl->link, (uv_link_close_cb) free);
-    //free(sl->link);
+    free(sl->link);
     sl->link = NULL;
 }

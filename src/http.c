@@ -79,7 +79,6 @@ static void http_read_cb(uv_link_t *link, ssize_t nread, const uv_buf_t *buf) {
         }
 
         close_connection(c);
-//        uv_async_send(&c->proc);
         if (buf && buf->base) {
             free(buf->base);
         }
@@ -114,9 +113,6 @@ static void http_read_cb(uv_link_t *link, ssize_t nread, const uv_buf_t *buf) {
             if (!keep_alive) {
                 close_connection(c);
             }
-            else {
-                // uv_async_send(&c->proc);
-            }
         }
     } else if (nread > 0) {
         UM_LOG(ERR, "received %zd bytes without active request", nread);
@@ -145,7 +141,6 @@ static void fail_active_request(um_http_t *c, int code, const char *msg) {
             r->resp.code = code;
             r->resp.status = strdup(msg);
             r->resp_cb(&r->resp, r->data);
-            uv_unref((uv_handle_t *) &c->proc);
         }
         http_req_free(r);
         free(r);
@@ -158,7 +153,6 @@ static void on_tls_handshake(tls_link_t *tls, int status) {
     switch (status) {
         case TLS_HS_COMPLETE:
             clt->connected = Connected;
-            //uv_async_send(&clt->proc);
             break;
 
         case TLS_HS_ERROR:
@@ -199,7 +193,6 @@ static void make_links(um_http_t *clt, uv_link_t *conn_src) {
 
     if (!clt->ssl) {
         clt->connected = Connected;
-        //uv_async_send(&clt->proc);
     }
 }
 
@@ -234,7 +227,6 @@ static void src_connect_cb(um_src_t *src, int status, void *ctx) {
         UM_LOG(DEBG, "failed to connect: %d(%s)", status, uv_strerror(status));
         clt->connected = Disconnected;
         fail_active_request(clt, status, uv_strerror(status));
-        // uv_async_send(clt->proc);
     }
 }
 
@@ -346,7 +338,6 @@ static void process_requests(uv_prepare_t *ar) {
             UM_LOG(VERB, "no more requests, scheduling idle(%ld) close", c->idle_time);
             uv_timer_start(c->conn_timer, idle_timeout, c->idle_time, 0);
         }
-        UM_LOG(INFO, "stopping proc(%p)", c->proc);
         uv_prepare_stop(c->proc);
         uv_unref((uv_handle_t *) c->proc);
         return;
@@ -391,7 +382,6 @@ int um_http_close(um_http_t *clt) {
     clt->conn_timer = NULL;
 
     clt->proc->data = NULL;
-    UM_LOG(INFO, "closing proc(%p)", clt->proc);
     uv_close((uv_handle_t *) clt->proc, (uv_close_cb) free);
     clt->proc = NULL;
 
@@ -623,6 +613,10 @@ static void free_http(um_http_t *clt) {
         clt->engine = NULL;
     }
     clt->tls = NULL;
+    if (clt->default_src) {
+        free(clt->default_src);
+        clt->default_src = NULL;
+    }
 
     if (clt->active) {
         http_req_free(clt->active);
