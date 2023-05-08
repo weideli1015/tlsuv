@@ -132,7 +132,7 @@ TEST_CASE("read/write","[uv-mbed]") {
         REQUIRE(status == 0);
         auto c = (tlsuv_stream_t *) r->handle;
 
-        tlsuv_stream_read(c, test_alloc, [](uv_stream_t *s, ssize_t status, const uv_buf_t *b) {
+        tlsuv_stream_read_start(c, test_alloc, [](uv_stream_t *s, ssize_t status, const uv_buf_t *b) {
             auto c = (tlsuv_stream_t *) s;
             auto ctx = (struct test_ctx *) c->data;
             if (status == UV_EOF) {
